@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-#Modified: 2020/10/05 20:33:45
+#Last Modified: 2021/01/30 10:08:58
 import blescan
 import logging
 import logging.handlers
@@ -13,56 +13,28 @@ import datetime
 import time
 import uuid
 import bluetooth._bluetooth as bluez
-sys.path.append("/usr/local/python")
-from daemon import daemon
+
 conf = configparser.ConfigParser()
-conf.read('/usr/local/python/avzdk.ini')
+conf.read(['tilt2mqtt.ini','tilt2mqtt_local.ini'])
+
+log = logging.getLogger(__name__)
+logging.basicConfig(
+    level=conf["LOG"]["LEVEL"],
+    format="%(levelname)s %(module)s.%(funcName)s %(message)s",
+)
+log.info(f"Starting service loglevel={conf['LOG']['LEVEL']} ")
+
+
+
 scriptname=os.path.basename(__file__)
 
 import paho.mqtt.client as mqtt
 mqtt_client = mqtt.Client(scriptname)
 
+INTERVAL = int(conf["TILT"]["Interval"])
+log.info(f"Checking every {INTERVAL} second")
 
-LOG_FILENAME = '/var/log/python/'+scriptname+'.log'
-LOG_LEVEL = logging.INFO  # Could be e.g. "DEBUG" or "WARNING"
-INTERVAL = 15*60 #15 minuter
 
-DAEMON_PIDFILE = '/tmp/'+scriptname+'.pid'
-parser = argparse.ArgumentParser(description="Tilt2")
-parser.add_argument("action",help="Action to perform start/stop/restart/run")
-parser.add_argument("-ll", "--loglevel", help="loglevel (default "+ str(LOG_LEVEL) + ")" )
-parser.add_argument("-i", "--interval", help="interval(default "+ str(INTERVAL) + ")" )
-args = parser.parse_args()
-if args.loglevel: LOG_LEVEL = args.loglevel
-if args.action:	ACTION = args.action
-if args.interval:	INTERVAL = int(args.interval)
-
-logger = logging.getLogger()
-logger.setLevel(LOG_LEVEL)
-handler = logging.handlers.TimedRotatingFileHandler(LOG_FILENAME, when="midnight", backupCount=5)
-handler.setFormatter(logging.Formatter('%(asctime)s %(name)s %(levelname)-8s %(message)s'))
-logger.addHandler(handler)
-
-class MyLogger(object):
-		def __init__(self, logger, level):
-				self.logger = logger
-				self.level = level
-
-		def write(self, message):
-				# Only log if there is a message (not just a new line)
-				if message.rstrip() != "":
-						self.logger.log(self.level, message.rstrip())
-		def flush(self):
-			pass
-
-if ACTION == "run": # Hvis det koeres som service sendes stdout ot stderr til logfil.
-	
-	logger.addHandler(logging.StreamHandler(sys.stdout))
-else:  # ellers sendes log til stdout
-	sys.stdout = MyLogger(logger, logging.INFO)
-	sys.stderr = MyLogger(logger, logging.ERROR)
-	
-# >>>LOGGING STOP
 
 
 
@@ -103,7 +75,7 @@ class TiltMonitor():
 	def __init__(self,pause,callback):
 		self.pause = pause
 		self.callback=callback
-		logger.info(f"Retrieving data every {pause} seconds")
+		log.info(f"Retrieving data every {pause} seconds")
 
 	def distinct(self,objects):
 		seen = set()
@@ -138,14 +110,14 @@ class TiltMonitor():
 			self.sock = bluez.hci_open_dev(self.dev_id)
 		
 		except:
-			logger.error('error accessing bluetooth device...')
+			log.error('error accessing bluetooth device...')
 			sys.exit(1)
 		blescan.hci_le_set_scan_parameters(self.sock)
 		blescan.hci_enable_le_scan(self.sock)
 
 		while True:
 				
-				logger.debug("check tilts for data")
+				log.debug("check tilts for data")
 				
 				a=blescan.parse_events(self.sock, 100)
 				
@@ -163,10 +135,8 @@ class TiltMonitor():
 							'sg_cal': self.calibrate_SG(beacon['minor']),
 							'measurementID' : str(uuid.uuid4())
 						}
-						logger.debug(data)
-		
+						log.debug(data)		
 						self.callback(data)
-				
 				time.sleep(self.pause)
 		
 
@@ -174,36 +144,17 @@ def tiltCallback(data):
 	data['msg_uuid']=str(uuid.uuid4())
 	data['time_send']=str(datetime.datetime.now())	
 	mqtt_client.connect(conf['MQTT']['Ip'])		
-	response=mqtt_client.publish(conf['MQTT']['tilt'],json.dumps(data))
-	logger.debug(f"Succes: {response.rc}" )
+	response=mqtt_client.publish(conf['MQTT']['channel'],json.dumps(data),1,True)
+	log.debug(f"Succes: {response.rc}" )
 	mqtt_client.disconnect()
 
 
-
-class MyDaemon(daemon):
-
-	def run(self):
-		t = TiltMonitor(INTERVAL,tiltCallback)
-		t.run()
 		
+		
+def main():
+	t = TiltMonitor(INTERVAL,tiltCallback)
+	t.run()
 
-daemon = MyDaemon(DAEMON_PIDFILE)
+if __name__ == "__main__":
+    main()
 
-if 'start' == ACTION :
-	logger.info("Daemon - Starting service --------------------------")
-	daemon.start()
-	
-elif 'stop' == ACTION :
-	logger.info("Daemon - Stopping service --------------------------")
-	daemon.stop()
-elif 'restart' == ACTION :
-	logger.info("Daemon - Restarting service --------------------------")
-	daemon.restart()
-elif 'run' == ACTION :
-	logger.info("Daemon - Running foreground")
-	daemon.run()
-elif 'status' == ACTION :
-	daemon.is_running()
-else:
-	print("Ukendt kommando")
-	sys.exit(2)
