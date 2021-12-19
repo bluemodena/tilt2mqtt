@@ -1,3 +1,4 @@
+pi@homelab-fermpi:~/tilt2mqtt $ cat tilt2mqtt.py 
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #Last Modified: 2021/01/30 10:08:58
@@ -10,6 +11,7 @@ import os
 import json
 import argparse
 import datetime
+import decimal
 import time
 import uuid
 import bluetooth._bluetooth as bluez
@@ -33,9 +35,6 @@ mqtt_client = mqtt.Client(scriptname)
 
 INTERVAL = int(conf["TILT"]["Interval"])
 log.info(f"Checking every {INTERVAL} second")
-
-
-
 
 
 class lineCalibration():
@@ -81,9 +80,12 @@ class TiltMonitor():
 		seen = set()
 		unique = []
 		for obj in objects:
-			if obj['uuid'] not in seen:
+			#print (obj)
+			obj_list = obj.split(",")
+			#print (obj_list[1])
+			if obj_list[1] not in seen:
 				unique.append(obj)
-				seen.add(obj['uuid'])
+				seen.add(obj_list[1])
 		return unique
 
 	def to_celsius(self,fahrenheit):
@@ -116,23 +118,23 @@ class TiltMonitor():
 		blescan.hci_enable_le_scan(self.sock)
 
 		while True:
-				
 				log.debug("check tilts for data")
-				
 				a=blescan.parse_events(self.sock, 100)
-				
 				beacons = self.distinct(a)
-				
 				for beacon in beacons:
-					
-					if beacon['uuid'] in self.TILTS.keys():
+					beacon_list = beacon.split(",")	
+					if beacon_list[1] in self.TILTS.keys():
+						print (beacon)
 						data ={
-							'tilt': self.TILTS[beacon['uuid']],
+							'tilt': self.TILTS[beacon_list[1]],
 							'time': str(datetime.datetime.now()),
-							'temperature': self.to_celsius(beacon['major']),
-							'temperature_cal': self.calibrate_Tc( self.to_celsius(beacon['major'])),
-							'sg': beacon['minor'],
-							'sg_cal': self.calibrate_SG(beacon['minor']),
+							'temperature': beacon_list[2],
+							#'temperature': self.to_celsius(beacon_list[2]),
+							#'temperature_cal': self.calibrate_Tc( self.to_celsius(beacon_list[2])),
+							#'temperature_cal': beacon_list[2],
+							'gravity': int(beacon_list[3])/1000,
+							#'sg_cal': self.calibrate_SG(beacon_list[3]),
+							#'sg_cal': beacon_list[3],
 							'measurementID' : str(uuid.uuid4())
 						}
 						log.debug(data)		
@@ -143,13 +145,12 @@ class TiltMonitor():
 def tiltCallback(data):
 	data['msg_uuid']=str(uuid.uuid4())
 	data['time_send']=str(datetime.datetime.now())	
-	mqtt_client.connect(conf['MQTT']['Ip'])		
-	response=mqtt_client.publish(conf['MQTT']['channel'],json.dumps(data),1,True)
-	log.debug(f"Succes: {response.rc}" )
+	mqtt_client.username_pw_set(conf['MQTT']['username'],conf['MQTT']['password'])
+	mqtt_client.connect(conf['MQTT']['ip'], int(conf['MQTT']['port']), 60)		
+	mqtt_topic=conf['MQTT']['channel'] + "/" + data['tilt']
+	response=mqtt_client.publish(mqtt_topic,json.dumps(data),1,True)
+	log.debug(f"Success: {response.rc}" )
 	mqtt_client.disconnect()
-
-
-		
 		
 def main():
 	t = TiltMonitor(INTERVAL,tiltCallback)
