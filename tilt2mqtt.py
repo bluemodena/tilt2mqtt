@@ -1,4 +1,3 @@
-pi@homelab-fermpi:~/tilt2mqtt $ cat tilt2mqtt.py 
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #Last Modified: 2021/01/30 10:08:58
@@ -35,6 +34,9 @@ mqtt_client = mqtt.Client(scriptname)
 
 INTERVAL = int(conf["TILT"]["Interval"])
 log.info(f"Checking every {INTERVAL} second")
+
+
+
 
 
 class lineCalibration():
@@ -83,9 +85,11 @@ class TiltMonitor():
 			#print (obj)
 			obj_list = obj.split(",")
 			#print (obj_list[1])
+#			if obj['uuid'] not in seen:
 			if obj_list[1] not in seen:
 				unique.append(obj)
 				seen.add(obj_list[1])
+#				seen.add(obj['uuid'])
 		return unique
 
 	def to_celsius(self,fahrenheit):
@@ -125,31 +129,40 @@ class TiltMonitor():
 					beacon_list = beacon.split(",")	
 					if beacon_list[1] in self.TILTS.keys():
 						print (beacon)
-						data ={
+						tempData ={
 							'tilt': self.TILTS[beacon_list[1]],
 							'time': str(datetime.datetime.now()),
 							'temperature': beacon_list[2],
-							#'temperature': self.to_celsius(beacon_list[2]),
-							#'temperature_cal': self.calibrate_Tc( self.to_celsius(beacon_list[2])),
-							#'temperature_cal': beacon_list[2],
-							'gravity': int(beacon_list[3])/1000,
-							#'sg_cal': self.calibrate_SG(beacon_list[3]),
-							#'sg_cal': beacon_list[3],
 							'measurementID' : str(uuid.uuid4())
 						}
-						log.debug(data)		
-						self.callback(data)
+						gravityData ={
+							'tilt': self.TILTS[beacon_list[1]],
+							'time': str(datetime.datetime.now()),
+							'gravity': int(beacon_list[3])/1000,
+							'measurementID' : str(uuid.uuid4())
+						}
+						log.debug(tempData)		
+						log.debug(gravityData)		
+						self.callback(tempData, gravityData)
 				time.sleep(self.pause)
 		
 
-def tiltCallback(data):
-	data['msg_uuid']=str(uuid.uuid4())
-	data['time_send']=str(datetime.datetime.now())	
+def tiltCallback(tempData, gravityData):
 	mqtt_client.username_pw_set(conf['MQTT']['username'],conf['MQTT']['password'])
 	mqtt_client.connect(conf['MQTT']['ip'], int(conf['MQTT']['port']), 60)		
-	mqtt_topic=conf['MQTT']['channel'] + "/" + data['tilt']
-	response=mqtt_client.publish(mqtt_topic,json.dumps(data),1,True)
+
+	tempData['msg_uuid']=str(uuid.uuid4())
+	tempData['time_send']=str(datetime.datetime.now())	
+	mqtt_topic=conf['MQTT']['channel'] + "/" + tempData['tilt'] + "_temp"
+	response=mqtt_client.publish(mqtt_topic,json.dumps(tempData),1,True)
 	log.debug(f"Success: {response.rc}" )
+
+	gravityData['msg_uuid']=str(uuid.uuid4())
+	gravityData['time_send']=str(datetime.datetime.now())	
+	mqtt_topic=conf['MQTT']['channel'] + "/" + gravityData['tilt'] + "_gravity"
+	response=mqtt_client.publish(mqtt_topic,json.dumps(gravityData),1,True)
+	log.debug(f"Success: {response.rc}" )
+
 	mqtt_client.disconnect()
 		
 def main():
@@ -158,4 +171,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
